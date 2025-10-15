@@ -138,6 +138,24 @@ def create_chain(system_template):
 
     return chain
 
+def create_chain_with_memory(system_template, the_memory):
+    """
+    LLMによる回答生成用のChain作成
+    """
+
+    prompt = ChatPromptTemplate.from_messages([
+        SystemMessage(content=system_template),
+        MessagesPlaceholder(variable_name="history"),
+        HumanMessagePromptTemplate.from_template("{input}")
+    ])
+    chain = ConversationChain(
+        llm=st.session_state.llm,
+        memory=the_memory,
+        prompt=prompt
+    )
+
+    return chain
+
 def create_problem_and_play_audio():
     """
     問題生成と音声ファイルの再生

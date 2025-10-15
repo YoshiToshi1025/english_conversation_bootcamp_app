@@ -30,9 +30,20 @@ if "messages" not in st.session_state:
     st.session_state.messages = []
     st.session_state.qa_messages = []
     st.session_state.user_input_mode = ""
+    st.session_state.pre_situation = ""
     st.session_state.openai_obj = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
     st.session_state.llm = ChatOpenAI(model_name="gpt-4o-mini", temperature=0.5)
-    st.session_state.memory = ConversationSummaryBufferMemory(
+    st.session_state.conversation_memory = ConversationSummaryBufferMemory(
+        llm=st.session_state.llm,
+        max_token_limit=1000,
+        return_messages=True
+    )
+    st.session_state.evaluation_memory = ConversationSummaryBufferMemory(
+        llm=st.session_state.llm,
+        max_token_limit=1000,
+        return_messages=True
+    )
+    st.session_state.qa_memory = ConversationSummaryBufferMemory(
         llm=st.session_state.llm,
         max_token_limit=1000,
         return_messages=True
@@ -47,43 +58,59 @@ with st.sidebar:
     st.session_state.ai_conversation_setting_speed_key = st.selectbox("再生速度", options=list(ct.PLAY_SPEED_OPTION.keys()), index=1, label_visibility="visible")
     st.session_state.ai_conversation_setting_speed_value = ct.PLAY_SPEED_OPTION[st.session_state.ai_conversation_setting_speed_key]
 
+    if st.session_state.pre_situation == "":
+        st.session_state.pre_situation = st.session_state.ai_conversation_setting_situation
+    elif st.session_state.pre_situation != st.session_state.ai_conversation_setting_situation:
+        st.session_state.messages = []
+        st.session_state.pre_situation = st.session_state.ai_conversation_setting_situation
+        st.session_state.conversation_memory.clear()
+        st.session_state.evaluation_memory.clear()
+        st.session_state.qa_memory.clear()
+        st.rerun()
+
 # 英会話用のChain作成
-st.session_state.chain_basic_conversation = ft.create_chain(
-    ct.SYSTEM_TEMPLATE_BASIC_CONVERSATION.format(
-        conversation_level=st.session_state.ai_conversation_setting_conversation_level,
-        language=st.session_state.ai_conversation_setting_language
-    ))
+if "chain_basic_conversation" not in st.session_state or st.session_state.messages == []:
+    st.session_state.chain_basic_conversation = ft.create_chain_with_memory(
+        ct.SYSTEM_TEMPLATE_BASIC_CONVERSATION.format(
+            situation=st.session_state.ai_conversation_setting_situation,
+            conversation_level=st.session_state.ai_conversation_setting_conversation_level,
+            language=st.session_state.ai_conversation_setting_language
+        ), st.session_state.conversation_memory)
 
 # 英会話内容の総合評価用のChain作成
-st.session_state.chain_overall_evaluation = ft.create_chain(
-    ct.SYSTEM_TEMPLATE_OVERALL_EVALUATION.format(
-        conversation_level=st.session_state.ai_conversation_setting_conversation_level,
-        language=st.session_state.ai_conversation_setting_language
-    ))
+if "chain_overall_evaluation" not in st.session_state or st.session_state.messages == []:
+    st.session_state.chain_overall_evaluation = ft.create_chain_with_memory(
+        ct.SYSTEM_TEMPLATE_OVERALL_EVALUATION.format(
+            situation=st.session_state.ai_conversation_setting_situation,
+            conversation_level=st.session_state.ai_conversation_setting_conversation_level,
+            language=st.session_state.ai_conversation_setting_language
+        ), st.session_state.evaluation_memory)
 
 # 質問回答用のChain作成
-st.session_state.chain_qa_tutor = ft.create_chain(
-    ct.SYSTEM_TEMPLATE_QA_TUTOR.format(
-        conversation_level=st.session_state.ai_conversation_setting_conversation_level,
-        language=st.session_state.ai_conversation_setting_language
-    ))
+if "chain_qa_tutor" not in st.session_state or st.session_state.messages == []:
+    st.session_state.chain_qa_tutor = ft.create_chain_with_memory(
+        ct.SYSTEM_TEMPLATE_QA_TUTOR.format(
+            situation=st.session_state.ai_conversation_setting_situation,
+            conversation_level=st.session_state.ai_conversation_setting_conversation_level,
+            language=st.session_state.ai_conversation_setting_language
+        ), st.session_state.qa_memory)
 
 # タブ定義　でバックタブ表示指定がある場合はデバッグタブを表示
 if ct.DEBUG_TAB_FLAG:
-    conversation_tab, review_tab, qa_tab, debug_tab = st.tabs(["🗣️ 英会話", "📜 評価", "🙋 質問・相談", "🛠️ デバッグ"])
+    conversation_tab, review_tab, qa_tab, debug_tab = st.tabs(["🗣️ AIと英会話", "📜 AIによるアドバイス", "🙋 AIに何でも相談", "🛠️ デバッグ"])
 else:
-    conversation_tab, review_tab, qa_tab = st.tabs(["🗣️ 英会話", "📜 評価", "🙋 質問・相談"])
+    conversation_tab, review_tab, qa_tab = st.tabs(["🗣️ AIと英会話", "📜 AIによるアドバイス", "🙋 AIに何でも相談"])
 
 # 英会話タブ内の画面設定ーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーー
 with conversation_tab:
-    st.info("英会話：生成AI相手に音声やテキストで英会話の猛特訓を行うためのアプリです。英語をマスターするまで、繰り返し練習しましょう！",icon="🗣️")
+    st.info("AIと英会話：生成AI相手に音声やテキストで英会話の猛特訓を行うためのアプリです。英語をマスターするまで、繰り返し練習しましょう！",icon="🗣️")
 
     with st.chat_message("assistant", avatar=ct.AI_ICON_PATH):
         st.success("""
             【操作説明】
-            - 左側にあるAI会話設定欄でAIとの会話条件を設定できます。
-            - 「音声で会話」ボタンを押下すると、音声でAIとの会話ができます。
-            - 「テキストで会話」欄に会話文を入力すると、テキストでAIとの会話ができます。
+            - 画面左側の"AI会話設定"欄で、AIとの会話条件を設定します。シチュエーションを変更すると、会話履歴がリセットされます。
+            - 「音声で会話」ボタンを押下すると、音声でAIと会話できます。
+            - 「テキストで会話」欄に会話文を入力すると、テキストでAIと会話できます。
         """)
     st.divider()
 
@@ -97,6 +124,33 @@ with conversation_tab:
                 st.markdown(message["content"])
         else:
             st.divider()
+
+    # 音声入力またはテキスト入力があった場合の処理
+    if st.session_state.messages == []:
+        # 最初の会話文を生成して音声読み上げ
+        with st.spinner("最初の会話文の生成中..."):
+            llm_response = st.session_state.chain_basic_conversation.predict(input="")
+
+            # LLMからの回答を音声データに変換
+            llm_response_audio = st.session_state.openai_obj.audio.speech.create(
+                model="tts-1",
+                voice="alloy",
+                input=llm_response
+            )
+
+            # 一旦mp3形式で音声ファイル作成後、wav形式に変換
+            audio_output_file_path = f"{ct.AUDIO_OUTPUT_DIR}/audio_output_{int(time.time())}.wav"
+            ft.save_to_wav(llm_response_audio.content, audio_output_file_path)
+
+        # AIメッセージの画面表示とリストへの追加
+        with st.chat_message("assistant", avatar=ct.AI_ICON_PATH):
+            st.markdown(llm_response)
+
+        # 音声ファイルの読み上げ
+        ft.play_wav(audio_output_file_path, speed=st.session_state.ai_conversation_setting_speed_value)
+
+        # LLMからの回答をメッセージ一覧に追加
+        st.session_state.messages.append({"role": "assistant", "content": llm_response})
 
     # 音声入力とテキスト入力のボタン・チャット欄を横並びで表示
     col1, col2 = st.columns([1, 5])
@@ -112,7 +166,6 @@ with conversation_tab:
         st.session_state.user_input_mode = "text"
         st.session_state.user_input_text = user_input_text.strip()
 
-    # 音声入力またはテキスト入力があった場合の処理
     if st.session_state.user_input_mode == "voice":
         # 音声入力モード選択時の処理
 
@@ -144,12 +197,12 @@ with conversation_tab:
             audio_output_file_path = f"{ct.AUDIO_OUTPUT_DIR}/audio_output_{int(time.time())}.wav"
             ft.save_to_wav(llm_response_audio.content, audio_output_file_path)
 
-        # 音声ファイルの読み上げ
-        ft.play_wav(audio_output_file_path, speed=st.session_state.ai_conversation_setting_speed_value)
-
         # AIメッセージの画面表示とリストへの追加
         with st.chat_message("assistant", avatar=ct.AI_ICON_PATH):
             st.markdown(llm_response)
+
+        # 音声ファイルの読み上げ
+        ft.play_wav(audio_output_file_path, speed=st.session_state.ai_conversation_setting_speed_value)
 
         # ユーザー入力値とLLMからの回答をメッセージ一覧に追加
         st.session_state.messages.append({"role": "user", "content": user_input_text})
@@ -197,12 +250,12 @@ with conversation_tab:
             audio_output_file_path = f"{ct.AUDIO_OUTPUT_DIR}/audio_output_{int(time.time())}.wav"
             ft.save_to_wav(llm_response_audio.content, audio_output_file_path)
 
-        # 音声ファイルの読み上げ
-        ft.play_wav(audio_output_file_path, speed=st.session_state.ai_conversation_setting_speed_value)
-
         # AIメッセージの画面表示とリストへの追加
         with st.chat_message("assistant", avatar=ct.AI_ICON_PATH):
             st.markdown(llm_response)
+
+        # 音声ファイルの読み上げ
+        ft.play_wav(audio_output_file_path, speed=st.session_state.ai_conversation_setting_speed_value)
 
         # ユーザー入力値とLLMからの回答をメッセージ一覧に追加
         st.session_state.messages.append({"role": "user", "content": user_input_text})
@@ -213,7 +266,7 @@ with conversation_tab:
 
 # 評価タブ内の画面設定ーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーー
 with review_tab:
-    st.info("評価：あなたの会話内容について、AIによる採点と評価結果を行います。",icon="📜")
+    st.info("AIによるアドバイス：あなたの会話内容について、AIによるアドバイスを行います。",icon="📜")
 
     # メッセージ履歴からユーザーの最後の会話文を取得
     user_input_text = ""
@@ -231,15 +284,15 @@ with review_tab:
 
         with st.spinner("会話内容の分析中..."):
             # ユーザー入力値を英会話評価用LLMに渡して評価結果を取得
-            llm_response_qa = st.session_state.chain_overall_evaluation.predict(input=user_input_text)
+            llm_response_evaluation = st.session_state.chain_overall_evaluation.predict(input=user_input_text)
 
         # AIメッセージの画面表示とリストへの追加
         with st.chat_message("assistant", avatar=ct.AI_ICON_PATH):
-            st.markdown(llm_response_qa)
+            st.markdown(llm_response_evaluation)
 
 # 質問・相談タブ内の画面設定ーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーー
 with qa_tab:
-    st.info("質問・相談：テキストを入力して、AIに英会話に関連する質問や相談ができます。",icon="🙋")
+    st.info("AIに何でも相談：テキストを入力して、AIに英会話に関連する質問や相談ができます。",icon="🙋")
 
     # ユーザとAIのメッセージ履歴の表示
     for qa_message in st.session_state.qa_messages:
@@ -250,7 +303,7 @@ with qa_tab:
             with st.chat_message(qa_message["role"], avatar=ct.AI_ICON_PATH):
                 st.markdown(qa_message["content"])
 
-    question_text = st.chat_input("英会話に関して、質問したいことがあれば、AIに相談してみてください。")
+    question_text = st.chat_input("英会話に関して知りたいことがあれば、AIに質問してみましょう。")
 
     if question_text and len(question_text.strip()) > 0:
         question_text = question_text.strip()

@@ -27,37 +27,40 @@ st.markdown(f"## {app_title}")  # タイトル表示
 
 # 初期設定
 if "messages" not in st.session_state:
-    st.session_state.messages = []
-    st.session_state.qa_messages = []
-    st.session_state.user_input_mode = ""
-    st.session_state.pre_situation = ""
-    st.session_state.openai_obj = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
-    st.session_state.llm = ChatOpenAI(model_name="gpt-4o-mini", temperature=0.5)
+    st.session_state.messages = []                                                  # ユーザとAIの会話履歴
+st.session_state.qa_messages = []                                                   # ユーザとAIのQ&A履歴
+    st.session_state.user_input_mode = ""                                           # ユーザの入力モード（音声 or テキスト）
+st.session_state.pre_situation = ""                                                 # 前回のシチュエーション
+    st.session_state.openai_obj = OpenAI(api_key=os.environ["OPENAI_API_KEY"])      # OpenAIオブジェクト
+    st.session_state.llm = ChatOpenAI(model_name="gpt-4o-mini", temperature=0.5)    # LLMオブジェクト
     st.session_state.conversation_memory = ConversationSummaryBufferMemory(
         llm=st.session_state.llm,
         max_token_limit=1000,
         return_messages=True
-    )
+    )                                                                               # 英会話用のメモリ
     st.session_state.evaluation_memory = ConversationSummaryBufferMemory(
         llm=st.session_state.llm,
         max_token_limit=1000,
         return_messages=True
-    )
+    )                                                                               # 英会話評価用のメモリ
     st.session_state.qa_memory = ConversationSummaryBufferMemory(
         llm=st.session_state.llm,
         max_token_limit=1000,
         return_messages=True
-    )
+    )                                                                               # 質問回答用のメモリ
+    st.session_state.user_input_update_flag = False                                 # ユーザ入力値更新フラグ
+    st.session_state.llm_response_evaluation = ""                                   # 英会話評価用のLLM回答
 
 # 左サイドバーの画面設定
 with st.sidebar:
     st.markdown("## ⚙️ AI会話設定")
     st.session_state.ai_conversation_setting_situation = st.selectbox("シチュエーション", options=ct.SITUATION_OPTION, label_visibility="visible")
     st.session_state.ai_conversation_setting_conversation_level = st.selectbox("会話レベル", options=ct.CONVERSATION_LEVEL_OPTION, label_visibility="visible")
-    st.session_state.ai_conversation_setting_language = st.selectbox("言語選択", options=ct.LANGUAGE_OPTION, label_visibility="visible")
-    st.session_state.ai_conversation_setting_speed_key = st.selectbox("再生速度", options=list(ct.PLAY_SPEED_OPTION.keys()), index=1, label_visibility="visible")
+    st.session_state.ai_conversation_setting_language = st.selectbox("言語", options=ct.LANGUAGE_OPTION, label_visibility="visible")
+    st.session_state.ai_conversation_setting_speed_key = st.selectbox("発声速度", options=list(ct.PLAY_SPEED_OPTION.keys()), index=1, label_visibility="visible")
     st.session_state.ai_conversation_setting_speed_value = ct.PLAY_SPEED_OPTION[st.session_state.ai_conversation_setting_speed_key]
 
+    # シチュエーションが変更された場合に会話履歴をリセット
     if st.session_state.pre_situation == "":
         st.session_state.pre_situation = st.session_state.ai_conversation_setting_situation
     elif st.session_state.pre_situation != st.session_state.ai_conversation_setting_situation:
@@ -95,7 +98,7 @@ if "chain_qa_tutor" not in st.session_state or st.session_state.messages == []:
             language=st.session_state.ai_conversation_setting_language
         ), st.session_state.qa_memory)
 
-# タブ定義　でバックタブ表示指定がある場合はデバッグタブを表示
+# タブ定義　    デバッグタブ表示指定がある場合はデバッグタブを表示
 if ct.DEBUG_TAB_FLAG:
     conversation_tab, review_tab, qa_tab, debug_tab = st.tabs(["🗣️ AIと英会話", "📜 AIによるアドバイス", "🙋 AIに何でも相談", "🛠️ デバッグ"])
 else:
@@ -105,6 +108,7 @@ else:
 with conversation_tab:
     st.info("AIと英会話：生成AI相手に音声やテキストで英会話の猛特訓を行うためのアプリです。英語をマスターするまで、繰り返し練習しましょう！",icon="🗣️")
 
+    # 操作説明の表示
     with st.chat_message("assistant", avatar=ct.AI_ICON_PATH):
         st.success("""
             【操作説明】
@@ -159,13 +163,15 @@ with conversation_tab:
         user_input_voice_flag = st.button("音声で会話", use_container_width=False, type="primary")
     with col2:
         user_input_text = st.chat_input("テキストで会話")
-    
+
+    # ユーザ入力があった場合のユーザー入力モードの設定
     if user_input_voice_flag:
         st.session_state.user_input_mode = "voice"
     elif user_input_text and len(user_input_text.strip()) > 0:
         st.session_state.user_input_mode = "text"
         st.session_state.user_input_text = user_input_text.strip()
 
+    # ユーザ入力モードに応じた処理
     if st.session_state.user_input_mode == "voice":
         # 音声入力モード選択時の処理
 
@@ -182,7 +188,7 @@ with conversation_tab:
         with st.chat_message("user", avatar=ct.USER_ICON_PATH):
             st.markdown(user_input_text)
 
-        with st.spinner("回答の音声読み上げ準備中..."):
+        with st.spinner("AI会話文の生成中..."):
             # ユーザー入力値をLLMに渡して回答取得
             llm_response = st.session_state.chain_basic_conversation.predict(input=user_input_text)
             
@@ -208,7 +214,10 @@ with conversation_tab:
         st.session_state.messages.append({"role": "user", "content": user_input_text})
         st.session_state.messages.append({"role": "assistant", "content": llm_response})
 
+        # 処理用フラグのリセット
+        st.session_state.user_input_update_flag = True
         st.session_state.user_input_mode = ""
+
         st.rerun()
 
     elif st.session_state.user_input_mode == "text":
@@ -235,7 +244,7 @@ with conversation_tab:
         ft.play_wav(audio_output_file_path, speed=st.session_state.ai_conversation_setting_speed_value)
 
         #　LLM会話文の生成と読み上げ
-        with st.spinner("AI会話文生成と音声読み上げの準備中..."):
+        with st.spinner("AI会話文の生成中..."):
             # ユーザー入力値をLLMに渡して回答取得
             llm_response = st.session_state.chain_basic_conversation.predict(input=user_input_text)
             
@@ -261,7 +270,10 @@ with conversation_tab:
         st.session_state.messages.append({"role": "user", "content": user_input_text})
         st.session_state.messages.append({"role": "assistant", "content": llm_response})
 
+        # 処理用フラグのリセット
+        st.session_state.user_input_update_flag = True
         st.session_state.user_input_mode = ""
+
         st.rerun()
 
 # 評価タブ内の画面設定ーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーー
@@ -282,13 +294,16 @@ with review_tab:
         with st.chat_message("user", avatar=ct.USER_ICON_PATH):
             st.markdown(user_input_text)
 
-        with st.spinner("会話内容の分析中..."):
-            # ユーザー入力値を英会話評価用LLMに渡して評価結果を取得
-            llm_response_evaluation = st.session_state.chain_overall_evaluation.predict(input=user_input_text)
+        if st.session_state.user_input_update_flag == True:
+            with st.spinner("会話内容の分析中..."):
+                # ユーザー入力値を英会話評価用LLMに渡して評価結果を取得
+                llm_response_evaluation = st.session_state.chain_overall_evaluation.predict(input=user_input_text)
+                st.session_state.llm_response_evaluation = llm_response_evaluation
+                st.session_state.user_input_update_flag = False
 
         # AIメッセージの画面表示とリストへの追加
         with st.chat_message("assistant", avatar=ct.AI_ICON_PATH):
-            st.markdown(llm_response_evaluation)
+            st.markdown(st.session_state.llm_response_evaluation)
 
 # 質問・相談タブ内の画面設定ーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーー
 with qa_tab:
@@ -303,8 +318,10 @@ with qa_tab:
             with st.chat_message(qa_message["role"], avatar=ct.AI_ICON_PATH):
                 st.markdown(qa_message["content"])
 
+    # ユーザの質問入力欄
     question_text = st.chat_input("英会話に関して知りたいことがあれば、AIに質問してみましょう。")
 
+    # ユーザの質問入力があった場合の処理
     if question_text and len(question_text.strip()) > 0:
         question_text = question_text.strip()
 
@@ -335,9 +352,8 @@ if ct.DEBUG_TAB_FLAG:
             現在のAI会話設定
             - シチュエーション：{st.session_state.ai_conversation_setting_situation}
             - 会話レベル：{st.session_state.ai_conversation_setting_conversation_level}
-            - 言語選択：{st.session_state.ai_conversation_setting_language}
-            - 再生速度：{st.session_state.ai_conversation_setting_speed_key}（{st.session_state.ai_conversation_setting_speed_value}倍速）
+            - 言語：{st.session_state.ai_conversation_setting_language}
+            - 発声速度：{st.session_state.ai_conversation_setting_speed_key}（{st.session_state.ai_conversation_setting_speed_value}倍速）
         """,icon="⚙️")
 
         st.info(f"{st.session_state}", icon="🛠️",)
-
